@@ -1,5 +1,5 @@
 package structsql
 
-func Delete(any) (string, []interface{}) {
-	return "", nil
+func Delete(any) (string, []interface{}, error) {
+	return "", nil, nil
 }

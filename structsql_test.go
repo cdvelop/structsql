@@ -13,12 +13,19 @@ type User struct {
 	Email string `db:"email"`
 }
 
+func (u User) StructName() string {
+	return "User"
+}
+
 func TestInsert(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
 	wantSQL := "INSERT INTO users (id, name, email) VALUES (?, ?, ?)"
 	wantArgs := []interface{}{1, "Alice", "alice@example.com"}
 
-	gotSQL, gotArgs := structsql.Insert(u)
+	gotSQL, gotArgs, err := structsql.Insert(u)
+	if err != nil {
+		t.Fatalf("Insert error: %v", err)
+	}
 
 	if gotSQL != wantSQL {
 		t.Fatalf("Insert SQL mismatch:\n got: %s\nwant: %s", gotSQL, wantSQL)
@@ -28,12 +35,23 @@ func TestInsert(t *testing.T) {
 	}
 }
 
+func BenchmarkInsert(b *testing.B) {
+	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, _ = structsql.Insert(u)
+	}
+}
+
 func TestUpdate(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
 	wantSQL := "UPDATE users SET name=?, email=? WHERE id=?"
 	wantArgs := []interface{}{"Alice", "alice@example.com", 1}
 
-	gotSQL, gotArgs := structsql.Update(u)
+	gotSQL, gotArgs, err := structsql.Update(u)
+	if err != nil {
+		t.Fatalf("Update error: %v", err)
+	}
 
 	if gotSQL != wantSQL {
 		t.Fatalf("Update SQL mismatch:\n got: %s\nwant: %s", gotSQL, wantSQL)
@@ -45,7 +63,10 @@ func TestUpdate(t *testing.T) {
 
 func TestSelect(t *testing.T) {
 	wantSQL := "SELECT id, name, email FROM users WHERE id = ?"
-	gotSQL := structsql.Select(User{})
+	gotSQL, err := structsql.Select(User{})
+	if err != nil {
+		t.Fatalf("Select error: %v", err)
+	}
 	if gotSQL != wantSQL {
 		t.Fatalf("Select SQL mismatch:\n got: %s\nwant: %s", gotSQL, wantSQL)
 	}
@@ -56,7 +77,10 @@ func TestDelete(t *testing.T) {
 	wantSQL := "DELETE FROM users WHERE id=?"
 	wantArgs := []interface{}{1}
 
-	gotSQL, gotArgs := structsql.Delete(u)
+	gotSQL, gotArgs, err := structsql.Delete(u)
+	if err != nil {
+		t.Fatalf("Delete error: %v", err)
+	}
 
 	if gotSQL != wantSQL {
 		t.Fatalf("Delete SQL mismatch:\n got: %s\nwant: %s", gotSQL, wantSQL)

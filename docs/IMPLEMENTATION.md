@@ -42,7 +42,7 @@ Implement the `Insert` function in `insert.go` to generate SQL INSERT statements
 - Use `tinyreflect.TypeOf(v)` to get type
 - If `typ.Kind() != K.Struct`, return error
 - Use `tinystring.Conv` (pooled) for zero-allocation string operations:
-  - Get Conv from pool with `getConv()`, defer `putConv()`
+  - Get Conv from pool with `GetConv()`, defer `putConv()`
   - Table name: Write `v.StructName()` to buffer, `ToLower()`, append "s"
   - For each field: Parse `db` tag using buffer operations, extract column name
   - Build column list and placeholders by writing to buffers
@@ -54,12 +54,92 @@ Implement the `Insert` function in `insert.go` to generate SQL INSERT statements
 - [x] Analyze the Insert function requirements from structsql_test.go
 - [x] Understand tinyreflect API for struct inspection
 - [x] Understand tinystring API for string handling
-- [ ] Implement table name derivation from struct name (pluralization)
-- [ ] Implement field extraction with db tags
-- [ ] Build INSERT SQL statement using tinystring
-- [ ] Collect field values for args
-- [ ] Handle edge cases (non-struct input, empty structs)
-- [ ] Run tests to verify implementation
+- [x] Define StructNamer interface in structsql.go
+- [x] Update all CRUD function signatures to return error
+- [x] Update User struct in test to implement StructName()
+- [x] Update test calls to handle new return values
+- [x] Implement table name derivation from StructName() (pluralization)
+- [x] Implement field extraction with db tags
+- [x] Build INSERT SQL statement using tinystring Conv buffers
+- [x] Collect field values for args
+- [x] Handle edge cases (non-struct input, missing interface, empty structs)
+- [x] Run tests to verify implementation
+- [x] Create benchmark for Insert to verify allocations
+
+## Benchmark Results
+BenchmarkInsert-16    	 2607606	       451.2 ns/op	     352 B/op	      11 allocs/op
+
+The implementation currently has 11 allocations per operation, primarily from:
+- []string slice for column names
+- []interface{} slice for field values
+- Conv buffer operations (though pooled)
+
+Further optimization needed to achieve zero allocations for tinygo compatibility.
+
+## Optimization Plan for Zero Allocations
+
+### Current Allocation Sources Analysis
+Benchmark results show 11 allocations per operation:
+- 352 B/op total
+- Primary sources: []string slice, []interface{} slice, reflection operations
+
+### Alternative Optimization Strategies (API Preservation)
+
+#### 1. tinyreflect Allocation Review
+- **Investigate tinyreflect.Field() and NumField()**: Check if these methods allocate memory during struct field iteration
+- **Potential Fix**: Modify tinyreflect to use pre-allocated field descriptors or cache field metadata
+- **Impact**: Could reduce allocations from reflection operations
+
+#### 2. Slice Pool Implementation
+- **Introduce sync.Pool for slices**: Create pools for []string and []interface{} of common sizes
+- **Size-based pooling**: Pools for small (4 fields), medium (16 fields), large (64 fields) structs
+- **Return pooled slices**: Instead of new allocations, get from pool and return after use
+- **Expected reduction**: 4-6 allocations eliminated
+
+#### 3. Buffer Pre-allocation Strategy
+- **Pre-warm Conv pool**: Ensure sufficient Conv objects are created at startup
+- **Fixed buffer sizes**: Use larger initial buffer capacities to prevent expansion
+- **Pool sizing**: Calculate based on expected concurrent operations
+
+#### 4. Value Collection Optimization
+- **Minimize interface{} boxing**: Use type assertions or unsafe operations for known types
+- **Deferred boxing**: Collect values as concrete types, box only when returning
+- **But API constraint**: Must return []interface{}, so boxing unavoidable
+
+#### 5. Compile-time Optimization
+- **Code generation approach**: Generate type-specific Insert functions at compile time
+- **Eliminate runtime reflection**: Use generated code that directly accesses fields
+- **Zero runtime allocation**: All operations resolved at compile time
+- **Trade-off**: Requires code generation tooling, changes development workflow
+
+### Proposed Implementation Changes
+
+1. **Slice Pooling**:
+   ```go
+   var stringSlicePool = sync.Pool{New: func() any { return make([]string, 0, 16) }}
+   var interfaceSlicePool = sync.Pool{New: func() any { return make([]interface{}, 0, 16) }}
+   ```
+   - Get slices from pool, use append, return to pool
+
+2. **tinyreflect Optimization**:
+   - Review and optimize tinyreflect.Field() to avoid allocations
+   - Cache field metadata per type
+
+3. **Buffer Optimization**:
+   - Increase default Conv buffer sizes
+   - Pre-populate pool
+
+### Expected Outcome
+- Reduce allocations from 11 to 2-4
+- Maintain exact API compatibility
+- Improve performance for repeated calls
+- Better tinygo compatibility
+
+### Implementation Priority
+1. Implement slice pooling for []string and []interface{}
+2. Optimize Conv buffer management
+3. Review tinyreflect for allocation opportunities
+4. Consider compile-time code generation as future enhancement
 
 ## Next Steps
 Await user approval before proceeding to code implementation in Code mode.

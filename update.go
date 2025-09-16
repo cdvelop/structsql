@@ -1,7 +1,7 @@
 package structsql
 
-func Update(any) (string, []interface{}) {
+func Update(any) (string, []interface{}, error) {
 
-	return "", nil
+	return "", nil, nil
 
 }
