@@ -143,22 +143,72 @@ Detailed breakdown of remaining allocations based on code analysis:
    - Use [32]string and [32]interface{} on stack
    - Avoid heap allocation for small structs
 
+### New Proposal: Unsafe Offset Calculation with Tinyreflect
+
+#### Overview
+Calculate field offsets using tinyreflect (once per type) by taking addresses of field values relative to struct pointer, cache the offsets, then use unsafe.Pointer arithmetic for direct field access at runtime. This eliminates reflection boxing while maintaining the generic API.
+
+#### Implementation Strategy
+
+1. **Offset Calculation**:
+   ```go
+   // In cache building
+   val := tinyreflect.ValueOf(v)
+   fieldVal, _ := val.Field(i)
+   // Assume tinyreflect.Value has Addr() method
+   fieldAddr := fieldVal.Addr().Pointer()
+   structAddr := uintptr(unsafe.Pointer(&v))
+   offset := fieldAddr - structAddr
+   ```
+
+2. **Runtime Access**:
+   ```go
+   // In value extraction
+   ptr := unsafe.Pointer(&v)
+   switch field.Kind {
+   case 2: // int
+       val := *(*int)(unsafe.Pointer(uintptr(ptr) + offset))
+       values[valCount] = val
+   }
+   ```
+
+3. **Cache Storage**:
+   Extend FieldInfo to include offset and kind from tinyreflect.
+
+#### Benefits
+- **Zero Allocations**: Direct unsafe access, no reflection boxing
+- **Generic API**: Maintains tinyreflect for type inspection
+- **Performance**: Fast unsafe access after initial calculation
+- **Tinygo Compatible**: Unsafe operations work in constrained environments
+
+#### Assumptions
+- tinyreflect.Value has Addr() and Pointer() methods (similar to Go reflect)
+- Field layout is consistent across instances
+- Memory alignment is handled properly
+
+#### Expected Results
+- **Target**: 0 allocs/op (slice header may remain)
+- **Performance**: <250 ns/op
+- **Compatibility**: Full tinygo support
+
 ### Safety Considerations
 - Unsafe operations require careful validation
 - Type safety must be maintained
 - Bounds checking for array access
 - Memory alignment considerations
 
+
 ### Implementation Roadmap
 1. Implement type information caching
-2. Add unsafe value extraction (with safety checks)
-3. Optimize buffer pool management
-4. Apply stack-based optimizations
-5. Target: Reduce to 0-1 allocs for tinygo compatibility
+2. Add unsafe offset calculation with tinyreflect (new proposal)
+3. Implement unsafe value extraction at runtime
+4. Optimize buffer pool management
+5. Apply stack-based optimizations
+6. Target: Achieve 0 allocs for tinygo compatibility
 
 ### Expected Final Results
-- **Target**: 0-2 allocs/op
-- **Performance**: <300 ns/op
+- **Target**: 0 allocs/op
+- **Performance**: <250 ns/op
 - **Compatibility**: Full tinygo support
 
 ### Important Notes
@@ -242,4 +292,5 @@ func Insert(v any, columns *[]string, values *[]interface{}) (string, error) {
 3. If insufficient, consider API change or other strategies
 
 ## Next Steps
-Await user approval before proceeding to code implementation in Code mode.
+New proposal: Unsafe offset calculation with tinyreflect for zero allocations.
+Await user approval before proceeding to implementation.
