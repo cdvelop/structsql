@@ -70,6 +70,11 @@ BenchmarkInsert-16    	 3588081	       329.6 ns/op	     640 B/op	       6 allocs
 
 **Improvement**: Allocations reduced from 11 to 6 (45% reduction), performance improved from 451.2 ns/op to 329.6 ns/op.
 
+### After Type Caching Optimization
+BenchmarkInsert-16    	 4659055	       261.3 ns/op	     624 B/op	       3 allocs/op
+
+**Improvement**: Allocations reduced from 6 to 3 (50% reduction), performance improved from 329.6 ns/op to 261.3 ns/op.
+
 ### Analysis of Remaining 6 Allocations
 
 Detailed breakdown of remaining allocations based on code analysis:
@@ -83,45 +88,83 @@ Detailed breakdown of remaining allocations based on code analysis:
    - `fieldVal.Interface()` - interface boxing
 4. **Buffer Operations (0-1 alloc)**: Potential buffer expansion in Conv
 
-### New Optimization Plan for Zero Allocations
+### New Optimization Plan (API Preservation)
 
-#### Phase 1: Pool Pre-warming
-- Pre-populate Conv pool at package initialization
-- Ensure sufficient Conv objects to avoid runtime allocation
-- **Expected reduction**: 1-2 allocs
+#### Phase 1: Type Information Caching
+- Implement global cache for struct type metadata
+- Cache field names, types, and tag information per struct type
+- Avoid repeated reflection.Field() calls
+- **Expected reduction**: 1-2 allocs from reflection
 
-#### Phase 2: Reflection Optimization
-- Cache type information per struct type
-- Use unsafe.Pointer for field access instead of reflection
-- Minimize interface{} boxing in value extraction
-- **Expected reduction**: 2 allocs
+#### Phase 2: Unsafe Value Extraction
+- Use unsafe.Pointer operations to access struct fields directly
+- Bypass interface{} boxing for primitive types
+- Implement type-specific value extraction functions
+- **Expected reduction**: 2 allocs from boxing
 
-#### Phase 3: Return Value Optimization
-- Since API change not allowed, minimize slice operations
-- Pre-allocate return slice in caller-provided buffer (document as recommendation)
-- **Expected reduction**: 1 alloc
+#### Phase 3: Buffer Pre-allocation and Reuse
+- Pre-allocate Conv buffers at package init
+- Ensure pool never exhausts during normal operation
+- Optimize buffer size calculations
+- **Expected reduction**: 1 alloc from pool exhaustion
 
-#### Phase 4: Buffer Consolidation
-- Merge all string building into single buffer operation
-- Eliminate intermediate buffer resets
+#### Phase 4: Stack-Based Operations
+- Use stack-allocated arrays for intermediate operations
+- Minimize heap allocations by using local variables
+- Optimize string building to use single buffer pass
+- **Expected reduction**: 1 alloc from temporary objects
+
+#### Phase 5: Inline Optimizations
+- Inline critical path operations
+- Eliminate function call overhead in hot paths
+- Use compile-time optimizations where possible
 - **Expected reduction**: 0-1 alloc
 
-#### Phase 5: Compile-time Code Generation (Future)
-- Generate type-specific Insert functions
-- Eliminate runtime reflection entirely
-- **Expected**: 0 allocs
+### Implementation Strategy
+1. **Type Cache Implementation**:
+   ```go
+   var typeCache = make(map[uintptr]*TypeInfo)
+   type TypeInfo struct {
+       fields []FieldInfo
+   }
+   ```
+
+2. **Unsafe Field Access**:
+   - Calculate field offsets at runtime
+   - Use unsafe.Pointer arithmetic for value extraction
+   - Maintain type safety through careful offset calculations
+
+3. **Buffer Pool Optimization**:
+   - Increase pool size
+   - Pre-warm with multiple Conv objects
+   - Monitor pool usage in benchmarks
+
+4. **Stack Allocation**:
+   - Use [32]string and [32]interface{} on stack
+   - Avoid heap allocation for small structs
+
+### Safety Considerations
+- Unsafe operations require careful validation
+- Type safety must be maintained
+- Bounds checking for array access
+- Memory alignment considerations
 
 ### Implementation Roadmap
-1. Implement Conv pool pre-warming
-2. Optimize reflection calls with caching
-3. Minimize interface boxing
-4. Consolidate buffer operations
-5. Target: Reduce to 0-2 allocs for tinygo compatibility
+1. Implement type information caching
+2. Add unsafe value extraction (with safety checks)
+3. Optimize buffer pool management
+4. Apply stack-based optimizations
+5. Target: Reduce to 0-1 allocs for tinygo compatibility
 
 ### Expected Final Results
 - **Target**: 0-2 allocs/op
 - **Performance**: <300 ns/op
 - **Compatibility**: Full tinygo support
+
+### Important Notes
+- **ToLower Usage**: Always use `Conv.ToLower()` method from `tinystring/capitalize.go`, not standalone functions
+- **Buffer Operations**: All string processing must go through `Conv` pooled buffers for zero-allocation
+- **API Preservation**: All optimizations maintain the existing function signatures
 
 ## Optimization Plan for Zero Allocations
 

@@ -3,6 +3,7 @@ package structsql
 import (
 	"github.com/cdvelop/tinyreflect"
 	. "github.com/cdvelop/tinystring"
+	"unsafe"
 )
 
 func Insert(v any) (string, []interface{}, error) {
@@ -32,12 +33,34 @@ func Insert(v any) (string, []interface{}, error) {
 	// Reset for reuse
 	c.ResetBuffer(BuffOut)
 
-	// Get fields
-	numFields, err := typ.NumField()
-	if err != nil {
-		return "", nil, err
+	// Get cached type info
+	typPtr := uintptr(unsafe.Pointer(typ))
+	typeInfo, ok := typeCache[typPtr]
+	if !ok {
+		// Build cache
+		numFields, err := typ.NumField()
+		if err != nil {
+			return "", nil, err
+		}
+		fields := make([]FieldInfo, numFields)
+		for i := 0; i < numFields; i++ {
+			field, err := typ.Field(i)
+			if err != nil {
+				return "", nil, err
+			}
+			c := GetConv()
+			c.WrString(BuffOut, field.Name.Name())
+			c.ToLower()
+			name := c.GetString(BuffOut)
+			c.ResetBuffer(BuffOut)
+			c.PutConv()
+			fields[i] = FieldInfo{Name: name}
+		}
+		typeInfo = &TypeInfo{fields: fields}
+		typeCache[typPtr] = typeInfo
 	}
 
+	numFields := len(typeInfo.fields)
 	if numFields == 0 {
 		return "", nil, Err("struct has no fields")
 	}
@@ -48,15 +71,7 @@ func Insert(v any) (string, []interface{}, error) {
 	var colCount, valCount int
 
 	for i := 0; i < numFields; i++ {
-		field, err := typ.Field(i)
-		if err != nil {
-			return "", nil, err
-		}
-
-		c.WrString(BuffOut, field.Name.Name())
-		c.ToLower()
-		fieldName := c.GetString(BuffOut)
-		c.ResetBuffer(BuffOut)
+		fieldName := typeInfo.fields[i].Name
 
 		columns[colCount] = fieldName
 		colCount++
