@@ -43,9 +43,9 @@ func Insert(v any) (string, []interface{}, error) {
 	}
 
 	// Collect columns and values
-	var columns []string
-	var values []interface{}
-	var fieldName string
+	var columns [32]string
+	var values [32]interface{}
+	var colCount, valCount int
 
 	for i := 0; i < numFields; i++ {
 		field, err := typ.Field(i)
@@ -55,10 +55,11 @@ func Insert(v any) (string, []interface{}, error) {
 
 		c.WrString(BuffOut, field.Name.Name())
 		c.ToLower()
-		fieldName = c.GetString(BuffOut)
+		fieldName := c.GetString(BuffOut)
 		c.ResetBuffer(BuffOut)
 
-		columns = append(columns, fieldName)
+		columns[colCount] = fieldName
+		colCount++
 
 		// Get value
 		val := tinyreflect.ValueOf(v)
@@ -72,7 +73,8 @@ func Insert(v any) (string, []interface{}, error) {
 			return "", nil, err
 		}
 
-		values = append(values, iface)
+		values[valCount] = iface
+		valCount++
 	}
 
 	// Build SQL
@@ -81,17 +83,17 @@ func Insert(v any) (string, []interface{}, error) {
 	c.WrString(BuffOut, " (")
 
 	// Columns
-	for i, col := range columns {
+	for i := 0; i < colCount; i++ {
 		if i > 0 {
 			c.WrString(BuffOut, ", ")
 		}
-		c.WrString(BuffOut, col)
+		c.WrString(BuffOut, columns[i])
 	}
 
 	c.WrString(BuffOut, ") VALUES (")
 
 	// Placeholders
-	for i := 0; i < len(columns); i++ {
+	for i := 0; i < colCount; i++ {
 		if i > 0 {
 			c.WrString(BuffOut, ", ")
 		}
@@ -102,5 +104,5 @@ func Insert(v any) (string, []interface{}, error) {
 
 	sql := c.GetString(BuffOut)
 
-	return sql, values, nil
+	return sql, values[:valCount], nil
 }

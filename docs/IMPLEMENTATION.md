@@ -50,96 +50,153 @@ Implement the `Insert` function in `insert.go` to generate SQL INSERT statements
 - Collect field values into `[]interface{}` (may require allocation, but minimize)
 - Return sql (from buffer), values, nil or error
 
-## Todo List
-- [x] Analyze the Insert function requirements from structsql_test.go
-- [x] Understand tinyreflect API for struct inspection
-- [x] Understand tinystring API for string handling
-- [x] Define StructNamer interface in structsql.go
-- [x] Update all CRUD function signatures to return error
-- [x] Update User struct in test to implement StructName()
-- [x] Update test calls to handle new return values
-- [x] Implement table name derivation from StructName() (pluralization)
-- [x] Implement field extraction with db tags
-- [x] Build INSERT SQL statement using tinystring Conv buffers
-- [x] Collect field values for args
-- [x] Handle edge cases (non-struct input, missing interface, empty structs)
-- [x] Run tests to verify implementation
-- [x] Create benchmark for Insert to verify allocations
+## Implementation Status
+- [x] Analyze requirements and design API
+- [x] Implement core Insert functionality with tinyreflect/tinystring
+- [x] Add StructNamer interface requirement
+- [x] Update all CRUD function signatures for error handling
+- [x] Implement zero-allocation optimizations (Conv buffers, fixed arrays)
+- [x] Create benchmarks and verify performance
+- [x] Achieve 45% allocation reduction (11 → 6 allocs/op)
+- [ ] Implement advanced optimizations for zero allocations
 
 ## Benchmark Results
+
+### Before Optimization
 BenchmarkInsert-16    	 2607606	       451.2 ns/op	     352 B/op	      11 allocs/op
 
-The implementation currently has 11 allocations per operation, primarily from:
-- []string slice for column names
-- []interface{} slice for field values
-- Conv buffer operations (though pooled)
+### After Fixed-Array Optimization
+BenchmarkInsert-16    	 3588081	       329.6 ns/op	     640 B/op	       6 allocs/op
 
-Further optimization needed to achieve zero allocations for tinygo compatibility.
+**Improvement**: Allocations reduced from 11 to 6 (45% reduction), performance improved from 451.2 ns/op to 329.6 ns/op.
+
+### Analysis of Remaining 6 Allocations
+
+Detailed breakdown of remaining allocations based on code analysis:
+
+1. **Conv Pool Allocation (1-2 allocs)**: `GetConv()` may allocate if pool is exhausted
+2. **Slice Header Creation (1 alloc)**: `values[:valCount]` creates slice header for return
+3. **Reflection Operations (2-3 allocs)**:
+   - `tinyreflect.TypeOf(v)` - type resolution
+   - `typ.Field(i)` - field descriptor creation
+   - `tinyreflect.ValueOf(v)` - value wrapper
+   - `fieldVal.Interface()` - interface boxing
+4. **Buffer Operations (0-1 alloc)**: Potential buffer expansion in Conv
+
+### New Optimization Plan for Zero Allocations
+
+#### Phase 1: Pool Pre-warming
+- Pre-populate Conv pool at package initialization
+- Ensure sufficient Conv objects to avoid runtime allocation
+- **Expected reduction**: 1-2 allocs
+
+#### Phase 2: Reflection Optimization
+- Cache type information per struct type
+- Use unsafe.Pointer for field access instead of reflection
+- Minimize interface{} boxing in value extraction
+- **Expected reduction**: 2 allocs
+
+#### Phase 3: Return Value Optimization
+- Since API change not allowed, minimize slice operations
+- Pre-allocate return slice in caller-provided buffer (document as recommendation)
+- **Expected reduction**: 1 alloc
+
+#### Phase 4: Buffer Consolidation
+- Merge all string building into single buffer operation
+- Eliminate intermediate buffer resets
+- **Expected reduction**: 0-1 alloc
+
+#### Phase 5: Compile-time Code Generation (Future)
+- Generate type-specific Insert functions
+- Eliminate runtime reflection entirely
+- **Expected**: 0 allocs
+
+### Implementation Roadmap
+1. Implement Conv pool pre-warming
+2. Optimize reflection calls with caching
+3. Minimize interface boxing
+4. Consolidate buffer operations
+5. Target: Reduce to 0-2 allocs for tinygo compatibility
+
+### Expected Final Results
+- **Target**: 0-2 allocs/op
+- **Performance**: <300 ns/op
+- **Compatibility**: Full tinygo support
 
 ## Optimization Plan for Zero Allocations
 
 ### Current Allocation Sources Analysis
 Benchmark results show 11 allocations per operation:
 - 352 B/op total
-- Primary sources: []string slice, []interface{} slice, reflection operations
+- Primary sources: []string slice header, []interface{} slice header, dynamic slice growth, reflection operations
 
-### Alternative Optimization Strategies (API Preservation)
+### Fixed-Size Array Strategy (API Preservation)
 
-#### 1. tinyreflect Allocation Review
-- **Investigate tinyreflect.Field() and NumField()**: Check if these methods allocate memory during struct field iteration
-- **Potential Fix**: Modify tinyreflect to use pre-allocated field descriptors or cache field metadata
-- **Impact**: Could reduce allocations from reflection operations
+#### Core Concept
+- Use fixed-size arrays instead of dynamic slices for column names and values
+- Assume maximum struct fields (e.g., 32) and pre-allocate arrays
+- Return slices of used portion: array[:count]
+- Eliminates dynamic slice allocation and growth
 
-#### 2. Slice Pool Implementation
-- **Introduce sync.Pool for slices**: Create pools for []string and []interface{} of common sizes
-- **Size-based pooling**: Pools for small (4 fields), medium (16 fields), large (64 fields) structs
-- **Return pooled slices**: Instead of new allocations, get from pool and return after use
-- **Expected reduction**: 4-6 allocations eliminated
+#### Implementation Details
 
-#### 3. Buffer Pre-allocation Strategy
-- **Pre-warm Conv pool**: Ensure sufficient Conv objects are created at startup
-- **Fixed buffer sizes**: Use larger initial buffer capacities to prevent expansion
-- **Pool sizing**: Calculate based on expected concurrent operations
-
-#### 4. Value Collection Optimization
-- **Minimize interface{} boxing**: Use type assertions or unsafe operations for known types
-- **Deferred boxing**: Collect values as concrete types, box only when returning
-- **But API constraint**: Must return []interface{}, so boxing unavoidable
-
-#### 5. Compile-time Optimization
-- **Code generation approach**: Generate type-specific Insert functions at compile time
-- **Eliminate runtime reflection**: Use generated code that directly accesses fields
-- **Zero runtime allocation**: All operations resolved at compile time
-- **Trade-off**: Requires code generation tooling, changes development workflow
-
-### Proposed Implementation Changes
-
-1. **Slice Pooling**:
+1. **Fixed Arrays**:
    ```go
-   var stringSlicePool = sync.Pool{New: func() any { return make([]string, 0, 16) }}
-   var interfaceSlicePool = sync.Pool{New: func() any { return make([]interface{}, 0, 16) }}
+   var columns [32]string
+   var values [32]interface{}
+   var colCount, valCount int
    ```
-   - Get slices from pool, use append, return to pool
 
-2. **tinyreflect Optimization**:
-   - Review and optimize tinyreflect.Field() to avoid allocations
-   - Cache field metadata per type
+2. **Append Operation**:
+   ```go
+   columns[colCount] = fieldName
+   colCount++
+   values[valCount] = iface
+   valCount++
+   ```
 
-3. **Buffer Optimization**:
-   - Increase default Conv buffer sizes
-   - Pre-populate pool
+3. **Return Slices**:
+   ```go
+   return sql, values[:valCount], nil
+   ```
 
-### Expected Outcome
-- Reduce allocations from 11 to 2-4
+#### Benefits
+- **No dynamic allocation**: Arrays are fixed size, allocated at function start
+- **Minimal slice headers**: Only small slice headers for return values
+- **Predictable memory usage**: No slice growth reallocations
+- **Tinygo compatible**: Fixed sizes work better with constrained environments
+
+#### Trade-offs
+- **Size limit**: Maximum 32 fields per struct
+- **Memory waste**: Unused array elements
+- **Stack allocation**: Arrays on stack may increase stack usage
+
+#### Expected Outcome
+- Reduce allocations from 11 to 3-5 (slice headers + any buffer operations)
 - Maintain exact API compatibility
-- Improve performance for repeated calls
-- Better tinygo compatibility
+- Enable tinygo compilation
+- Predictable performance
+
+### Alternative: Dynamic Pooling with Caller Responsibility
+If fixed arrays are insufficient, implement pooling where caller manages slice lifecycle:
+
+```go
+func Insert(v any, columns *[]string, values *[]interface{}) (string, error) {
+    // Append to provided slices
+    *columns = append(*columns, fieldName)
+    *values = append(*values, iface)
+    return sql, nil
+}
+```
+
+- Caller provides pre-allocated or pooled slices
+- Zero allocations in Insert function
+- Requires API change (not preferred)
 
 ### Implementation Priority
-1. Implement slice pooling for []string and []interface{}
-2. Optimize Conv buffer management
-3. Review tinyreflect for allocation opportunities
-4. Consider compile-time code generation as future enhancement
+1. Implement fixed-size array approach
+2. Test with benchmark
+3. If insufficient, consider API change or other strategies
 
 ## Next Steps
 Await user approval before proceeding to code implementation in Code mode.
