@@ -121,10 +121,10 @@ func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
 
 	c.WrString(BuffOut, ")")
 
-	*sql = c.GetString(BuffOut)
+	*sql = c.GetStringZeroCopy(BuffOut)
 
-	// Populate values slice
-	*values = make([]any, numFields)
+	// Populate values slice (reuse caller's buffer)
+	*values = (*values)[:0] // Clear existing values
 	val := tinyreflect.ValueOf(v)
 	for i := 0; i < numFields; i++ {
 		fieldVal, err := val.Field(i)
@@ -137,7 +137,7 @@ func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
 			return err
 		}
 
-		(*values)[i] = iface
+		*values = append(*values, iface) // Append to caller's buffer
 	}
 
 	return nil

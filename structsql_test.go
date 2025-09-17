@@ -24,7 +24,7 @@ func TestInsert(t *testing.T) {
 
 	s := structsql.New()
 	var gotSQL string
-	var gotArgs []any
+	gotArgs := make([]any, 0, 10) // Pre-allocate with capacity
 
 	err := s.Insert(&gotSQL, &gotArgs, u)
 	if err != nil {
@@ -44,9 +44,10 @@ func BenchmarkInsert(b *testing.B) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
 	s := structsql.New()
 	var sql string
-	var args []any
+	args := make([]any, 0, 10) // Pre-allocate with capacity
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		args = args[:0] // Clear for reuse
 		_ = s.Insert(&sql, &args, u)
 	}
 }
@@ -55,14 +56,11 @@ func BenchmarkInsertWithArgs(b *testing.B) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
 	s := structsql.New()
 	var sql string
-	var args []any
+	args := make([]any, 0, 10) // Pre-allocate with capacity
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		args = args[:0] // Clear for reuse (more efficient than nil assignment)
 		_ = s.Insert(&sql, &args, u)
-		// Clear args for next iteration
-		for j := range args {
-			args[j] = nil
-		}
 	}
 }
 
