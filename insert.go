@@ -1,9 +1,10 @@
 package structsql
 
 import (
+	"unsafe"
+
 	"github.com/cdvelop/tinyreflect"
 	. "github.com/cdvelop/tinystring"
-	"unsafe"
 )
 
 func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
@@ -21,7 +22,7 @@ func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
 	}
 
 	typ := tinyreflect.TypeOf(v)
-	if typ.Kind() != 25 {
+	if typ.Kind() != K.Struct {
 		return Err("input is not a struct")
 	}
 
