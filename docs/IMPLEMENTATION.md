@@ -438,12 +438,12 @@ Used `go tool pprof` to pinpoint exact allocation sources with line-by-line anal
 - **Allocations**: 0-1 allocs/op (near-zero allocation)
 - **Compatibility**: Full tinygo support maintained
 
-## 🎯 **New Plan: Zero Allocations Based on Profiling Evidence**
+## 🎯 **New Plan: Optimize GetConv() for Zero Allocations**
 
 ### **Evidence-Based Analysis**
-**✅ Confirmed**: Only 1 allocation remains from Conv pool exhaustion
+**✅ Confirmed**: Only 1 allocation remains from `GetConv()` pool exhaustion
 **✅ Root Cause**: `c := GetConv()` line 30 (5.01MB impact)
-**✅ Solution**: Eliminate Conv dependency entirely
+**✅ Solution**: Optimize GetConv() to eliminate pool allocation
 
 ### **Precise Profiling Results**
 ```bash
@@ -452,90 +452,128 @@ ROUTINE ======================== github.com/cdvelop/structsql.(*Structsql).Inser
         30:	c := GetConv()  ← EXACT ALLOCATION SOURCE
 ```
 
-### **New Optimization Strategy**
+### **GetConv() Analysis and Optimization**
 
-#### **Phase 1: Conv-Free SQL Building**
-**Objective**: Build SQL without Conv objects
-**Approach**: Direct string concatenation with pre-computed sizes
-**Implementation**:
+#### **Current GetConv() Implementation**
 ```go
-// Replace Conv-based SQL building with direct construction
-func (s *Structsql) buildSQLDirect(tableName string, fields []string) string {
-    // Pre-calculate total size to avoid reallocations
-    totalLen := len("INSERT INTO ") + len(tableName) + len(" (") +
-                calculateFieldsLen(fields) + len(") VALUES (") +
-                calculatePlaceholdersLen(len(fields)) + len(")")
-
-    var sql strings.Builder
-    sql.Grow(totalLen) // Single allocation for entire SQL
-
-    sql.WriteString("INSERT INTO ")
-    sql.WriteString(tableName)
-    sql.WriteString(" (")
-    // ... direct field writing
-    sql.WriteString(") VALUES (")
-    // ... direct placeholder writing
-    sql.WriteString(")")
-
-    return sql.String() // Zero-copy return
+func GetConv() *Conv {
+	c := convPool.Get().(*Conv)  // ← POTENTIAL ALLOCATION SOURCE
+	// Defensive cleanup: ensure object is completely clean
+	c.resetAllBuffers()
+	c.out = c.out[:0]
+	c.work = c.work[:0]
+	c.err = c.err[:0]
+	c.dataPtr = nil
+	c.kind = K.String
+	return c
 }
 ```
 
-#### **Phase 2: Conv-Free Field Processing**
-**Objective**: Process field names without Conv
-**Approach**: Cache processed field names at type registration
-**Implementation**:
-```go
-type TypeInfo struct {
-    fields []FieldInfo
-    processedFields []string // Pre-lowercased field names
-}
+#### **Root Cause Analysis**
+1. **Pool Exhaustion**: When pool is empty, `sync.Pool` may allocate new objects
+2. **Pre-warming Ineffective**: Current 20 Conv objects may not be sufficient
+3. **Concurrent Access**: Multiple goroutines may exhaust pool simultaneously
 
-func (s *Structsql) registerType(v any) {
-    // Process field names once during registration
-    for _, field := range rawFields {
-        processed := strings.ToLower(field.Name)
-        typeInfo.processedFields = append(typeInfo.processedFields, processed)
+#### **Optimization Strategy: Enhanced Pool Management**
+
+##### **Phase 1: Increase Pool Size and Pre-warming**
+```go
+// Increase from 20 to 100 pre-warmed objects
+func init() {
+    // Pre-warm Conv pool to reduce allocations
+    for i := 0; i < 100; i++ {  // Increased from 20
+        c := GetConv()
+        c.PutConv()
     }
 }
 ```
 
-#### **Phase 3: Instance-Level Conv Pool**
-**Objective**: Ensure zero pool exhaustion
-**Approach**: Per-instance Conv pool with guaranteed capacity
-**Implementation**:
+##### **Phase 2: Guaranteed Capacity Pool**
+```go
+// Replace sync.Pool with guaranteed capacity channel
+var convPool = make(chan *Conv, 200)  // Fixed capacity
+
+func init() {
+    // Pre-populate with guaranteed capacity
+    for i := 0; i < 200; i++ {
+        convPool <- &Conv{
+            out:  make([]byte, 0, 64),
+            work: make([]byte, 0, 64),
+            err:  make([]byte, 0, 64),
+        }
+    }
+}
+
+func GetConv() *Conv {
+    select {
+    case c := <-convPool:
+        // Reset and return
+        c.resetAllBuffers()
+        return c
+    default:
+        // Fallback allocation only if pool is truly exhausted
+        return &Conv{
+            out:  make([]byte, 0, 64),
+            work: make([]byte, 0, 64),
+            err:  make([]byte, 0, 64),
+        }
+    }
+}
+
+func (c *Conv) PutConv() {
+    select {
+    case convPool <- c:
+        // Successfully returned to pool
+    default:
+        // Pool is full, discard (rare case)
+    }
+}
+```
+
+##### **Phase 3: Instance-Level Pool (Alternative)**
 ```go
 type Structsql struct {
-    convPool chan *Conv // Guaranteed capacity channel
+    convPool chan *Conv  // Per-instance pool
 }
 
 func New() *Structsql {
     s := &Structsql{
-        convPool: make(chan *Conv, 100), // Pre-allocated capacity
+        convPool: make(chan *Conv, 50), // Instance-specific pool
     }
-    // Pre-populate pool
-    for i := 0; i < 100; i++ {
-        s.convPool <- &Conv{...}
+    // Pre-populate instance pool
+    for i := 0; i < 50; i++ {
+        s.convPool <- &Conv{
+            out:  make([]byte, 0, 64),
+            work: make([]byte, 0, 64),
+            err:  make([]byte, 0, 64),
+        }
     }
     return s
 }
 
 func (s *Structsql) getConv() *Conv {
-    return <-s.convPool // Never blocks, never allocates
+    select {
+    case c := <-s.convPool:
+        c.resetAllBuffers()
+        return c
+    default:
+        // Instance pool exhausted, use global pool
+        return GetConv()
+    }
 }
 ```
 
 ### **Expected Results**
-- **Memory**: 48 B/op → **<32 B/op** (additional 30% reduction)
+- **Memory**: 48 B/op → **48 B/op** (stable)
 - **Allocations**: 1 allocs/op → **0 allocs/op** (true zero allocations)
-- **Performance**: ~156 ns/op → **<140 ns/op** (additional improvement)
+- **Performance**: ~156 ns/op → **~150 ns/op** (slight improvement)
 - **Compatibility**: Full TinyGo support maintained
 
 ### **Implementation Priority**
-1. **Phase 1**: Conv-free SQL building (direct string construction)
-2. **Phase 2**: Field processing optimization (cache processed names)
-3. **Phase 3**: Instance-level pool guarantee (if needed)
+1. **Phase 1**: Increase global pool pre-warming (simple)
+2. **Phase 2**: Implement guaranteed capacity pool (robust)
+3. **Phase 3**: Add instance-level pool (advanced)
 
-**🎯 Final Target**: **True Zero Allocations** based on profiling evidence
+**🎯 Final Target**: **Zero Allocations** by eliminating GetConv() pool exhaustion
 
-**📋 Current Status**: Document consolidated with profiling data and new plan ready for implementation
+**📋 Current Status**: Document updated with GetConv() optimization plan ready for implementation
