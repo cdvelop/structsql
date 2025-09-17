@@ -18,7 +18,7 @@ type TypeInfo struct {
 
 type Structsql struct {
 	typeCache []typeCacheEntry
-	convPool  []*Conv
+	convPool  *Conv
 }
 
 type typeCacheEntry struct {
@@ -27,15 +27,12 @@ type typeCacheEntry struct {
 }
 
 func New() *Structsql {
+	// Get a Conv from pool but don't return it - keep it for this instance
+	conv := GetConv()
+
 	s := &Structsql{
 		typeCache: make([]typeCacheEntry, 0, 16), // Pre-allocate capacity
-		convPool:  make([]*Conv, 0, 10),          // Pre-allocate capacity
-	}
-
-	// Pre-warm Conv pool
-	for i := 0; i < 10; i++ {
-		c := GetConv()
-		s.convPool = append(s.convPool, c)
+		convPool:  conv,                          // Single Conv instance per Structsql
 	}
 
 	return s

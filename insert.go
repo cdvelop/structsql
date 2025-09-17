@@ -26,9 +26,11 @@ func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
 		return Err("input is not a struct")
 	}
 
-	// Get Conv for zero-allocation
-	c := GetConv()
-	defer c.PutConv()
+	// Use instance Conv (no allocation)
+	c := s.convPool
+	c.ResetBuffer(BuffOut)
+	c.ResetBuffer(BuffWork)
+	c.ResetBuffer(BuffErr)
 
 	// Table name: StructName() lowercased + "s"
 	tableName := namer.StructName()
@@ -65,12 +67,11 @@ func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
 			if err != nil {
 				return err
 			}
-			c := GetConv()
-			c.WrString(BuffOut, field.Name.Name())
-			c.ToLower()
-			name := c.GetString(BuffOut)
-			c.ResetBuffer(BuffOut)
-			c.PutConv()
+			// Use instance Conv for field name processing
+			s.convPool.WrString(BuffOut, field.Name.Name())
+			s.convPool.ToLower()
+			name := s.convPool.GetString(BuffOut)
+			s.convPool.ResetBuffer(BuffOut)
 			fields[i] = FieldInfo{Name: name}
 		}
 		typeInfo = &TypeInfo{fields: fields}
