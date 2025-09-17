@@ -6,16 +6,23 @@ import (
 	"unsafe"
 )
 
-func Insert(v any) (string, []interface{}, error) {
+func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
+	if len(structs) == 0 {
+		return Err("no structs provided")
+	}
+
+	// For now, handle only single struct (first one)
+	v := structs[0]
+
 	// Check if implements StructNamer
 	namer, ok := v.(StructNamer)
 	if !ok {
-		return "", nil, Err("struct does not implement StructNamer interface")
+		return Err("struct does not implement StructNamer interface")
 	}
 
 	typ := tinyreflect.TypeOf(v)
 	if typ.Kind() != 25 {
-		return "", nil, Err("input is not a struct")
+		return Err("input is not a struct")
 	}
 
 	// Get Conv for zero-allocation
@@ -33,20 +40,29 @@ func Insert(v any) (string, []interface{}, error) {
 	// Reset for reuse
 	c.ResetBuffer(BuffOut)
 
-	// Get cached type info
+	// Get cached type info (slice-based lookup)
 	typPtr := uintptr(unsafe.Pointer(typ))
-	typeInfo, ok := typeCache[typPtr]
-	if !ok {
+	var typeInfo *TypeInfo
+
+	// Find existing cache entry
+	for _, entry := range s.typeCache {
+		if entry.typePtr == typPtr {
+			typeInfo = entry.info
+			break
+		}
+	}
+
+	if typeInfo == nil {
 		// Build cache
 		numFields, err := typ.NumField()
 		if err != nil {
-			return "", nil, err
+			return err
 		}
 		fields := make([]FieldInfo, numFields)
 		for i := 0; i < numFields; i++ {
 			field, err := typ.Field(i)
 			if err != nil {
-				return "", nil, err
+				return err
 			}
 			c := GetConv()
 			c.WrString(BuffOut, field.Name.Name())
@@ -57,39 +73,27 @@ func Insert(v any) (string, []interface{}, error) {
 			fields[i] = FieldInfo{Name: name}
 		}
 		typeInfo = &TypeInfo{fields: fields}
-		typeCache[typPtr] = typeInfo
+
+		// Add to cache
+		if len(s.typeCache) < cap(s.typeCache) {
+			s.typeCache = append(s.typeCache, typeCacheEntry{typePtr: typPtr, info: typeInfo})
+		}
+		// If cache is full, don't cache (simple approach)
 	}
 
 	numFields := len(typeInfo.fields)
 	if numFields == 0 {
-		return "", nil, Err("struct has no fields")
+		return Err("struct has no fields")
 	}
 
-	// Collect columns and values
+	// Collect columns for SQL building
 	var columns [32]string
-	var values [32]interface{}
-	var colCount, valCount int
+	var colCount int
 
 	for i := 0; i < numFields; i++ {
 		fieldName := typeInfo.fields[i].Name
-
 		columns[colCount] = fieldName
 		colCount++
-
-		// Get value
-		val := tinyreflect.ValueOf(v)
-		fieldVal, err := val.Field(i)
-		if err != nil {
-			return "", nil, err
-		}
-
-		iface, err := fieldVal.Interface()
-		if err != nil {
-			return "", nil, err
-		}
-
-		values[valCount] = iface
-		valCount++
 	}
 
 	// Build SQL
@@ -117,7 +121,24 @@ func Insert(v any) (string, []interface{}, error) {
 
 	c.WrString(BuffOut, ")")
 
-	sql := c.GetString(BuffOut)
+	*sql = c.GetString(BuffOut)
 
-	return sql, values[:valCount], nil
+	// Populate values slice
+	*values = make([]any, numFields)
+	val := tinyreflect.ValueOf(v)
+	for i := 0; i < numFields; i++ {
+		fieldVal, err := val.Field(i)
+		if err != nil {
+			return err
+		}
+
+		iface, err := fieldVal.Interface()
+		if err != nil {
+			return err
+		}
+
+		(*values)[i] = iface
+	}
+
+	return nil
 }

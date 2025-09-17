@@ -16,21 +16,27 @@ type TypeInfo struct {
 	fields []FieldInfo
 }
 
-var typeCache = make(map[uintptr]*TypeInfo)
-
-type Structsql struct{}
-
-func New() *Structsql {
-
-     s := &Structsql{}
-
-     return s
+type Structsql struct {
+	typeCache []typeCacheEntry
+	convPool  []*Conv
 }
 
-func init() {
-     // Pre-warm Conv pool to reduce allocations
-     for i := 0; i < 10; i++ {
-          c := GetConv()
-          c.PutConv()
-     }
+type typeCacheEntry struct {
+	typePtr uintptr
+	info    *TypeInfo
+}
+
+func New() *Structsql {
+	s := &Structsql{
+		typeCache: make([]typeCacheEntry, 0, 16), // Pre-allocate capacity
+		convPool:  make([]*Conv, 0, 10),          // Pre-allocate capacity
+	}
+
+	// Pre-warm Conv pool
+	for i := 0; i < 10; i++ {
+		c := GetConv()
+		s.convPool = append(s.convPool, c)
+	}
+
+	return s
 }
