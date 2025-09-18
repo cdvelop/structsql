@@ -115,19 +115,39 @@ for i := 0; i < colCount; i++ {
 ### Default PostgreSQL Usage
 ```go
 s := structsql.New()
-// Generates: INSERT INTO users (id, name, email) VALUES ($1, $2, $3)
+// INSERT: INSERT INTO users (id, name, email) VALUES ($1, $2, $3)
+// UPDATE: UPDATE users SET name=$1, email=$2 WHERE id=$3
+// DELETE: DELETE FROM users WHERE id=$1
 ```
 
 ### Explicit PostgreSQL Configuration
 ```go
 s := structsql.New(structsql.PostgreSQL)
-// Generates: INSERT INTO users (id, name, email) VALUES ($1, $2, $3)
+// Same as default
 ```
 
 ### SQLite Configuration
 ```go
 s := structsql.New(structsql.SQLite)
-// Generates: INSERT INTO users (id, name, email) VALUES (?, ?, ?)
+// INSERT: INSERT INTO users (id, name, email) VALUES (?, ?, ?)
+// UPDATE: UPDATE users SET name=?, email=? WHERE id=?
+// DELETE: DELETE FROM users WHERE id=?
+```
+
+### Complete API Usage
+```go
+s := structsql.New()
+
+// Insert
+var sql string
+var values []any
+err := s.Insert(user, &sql, &values)
+
+// Update
+err = s.Update(user, &sql, &values)
+
+// Delete
+err = s.Delete(user, &sql, &values)
 ```
 
 ## Implementation Benefits
@@ -138,9 +158,10 @@ s := structsql.New(structsql.SQLite)
 - **Consistency**: Follows existing architecture patterns from IMPLEMENTATION.md
 
 ## Future Considerations
-- **Other SQL Operations**: Select, Update, Delete methods can adopt the same dbType logic
+- **Select Operations**: Select methods can adopt the same dbType logic for WHERE clauses
 - **Additional Databases**: MySQL, SQL Server support can be added similarly
 - **Advanced Configurations**: Connection strings, schema prefixes, etc., via additional `...any` parameters
+- **Batch Operations**: Support for multiple records in single operations
 
 ## Migration Path
 No breaking changes for existing users. New users can specify database type explicitly, while defaults ensure PostgreSQL compatibility.

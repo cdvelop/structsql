@@ -9,10 +9,33 @@ import (
 
 func TestInsert(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
+	wantSQL := "INSERT INTO users (id, name, email) VALUES ($1, $2, $3)"
+	wantArgs := []any{1, "Alice", "alice@example.com"}
+
+	s := structsql.New() // Default PostgreSQL
+	var gotSQL string
+	gotArgs := make([]any, 0, 10) // Pre-allocate with capacity
+
+	err := s.Insert(u, &gotSQL, &gotArgs)
+	if err != nil {
+		t.Fatalf("Insert error: %v", err)
+	}
+
+	if gotSQL != wantSQL {
+		t.Fatalf("Insert SQL mismatch:\n got: %s\nwant: %s", gotSQL, wantSQL)
+	}
+
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("Insert args mismatch:\n got: %v\nwant: %v", gotArgs, wantArgs)
+	}
+}
+
+func TestInsertSQLite(t *testing.T) {
+	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
 	wantSQL := "INSERT INTO users (id, name, email) VALUES (?, ?, ?)"
 	wantArgs := []any{1, "Alice", "alice@example.com"}
 
-	s := structsql.New()
+	s := structsql.New(structsql.SQLite)
 	var gotSQL string
 	gotArgs := make([]any, 0, 10) // Pre-allocate with capacity
 

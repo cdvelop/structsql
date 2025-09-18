@@ -115,7 +115,7 @@ func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error {
 		if i > 0 {
 			c.WrString(BuffOut, ", ")
 		}
-		c.WrString(BuffOut, "?")
+		s.dbType.placeholder(i+1, c)
 	}
 
 	c.WrString(BuffOut, ")")
