@@ -4,10 +4,6 @@ import (
 	. "github.com/cdvelop/tinystring"
 )
 
-type StructNamer interface {
-	StructName() string
-}
-
 type FieldInfo struct {
 	Name string
 }

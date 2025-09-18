@@ -7,23 +7,21 @@ import (
 	. "github.com/cdvelop/tinystring"
 )
 
-func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
-	if len(structs) == 0 {
-		return Err("no structs provided")
+func (s *Structsql) Insert(sql *string, values *[]any, structTable any) error {
+	if structTable == nil {
+		return Err("no struct table provided")
 	}
 
 	// For now, handle only single struct (first one)
-	v := structs[0]
-
-	// Check if implements StructNamer
-	namer, ok := v.(StructNamer)
-	if !ok {
-		return Err("struct does not implement StructNamer interface")
-	}
+	v := structTable
 
 	typ := tinyreflect.TypeOf(v)
 	if typ.Kind() != K.Struct {
 		return Err("input is not a struct")
+	}
+
+	if typ.Name() == "" {
+		return Err("struct does not implement StructNamer interface")
 	}
 
 	// Use instance Conv (no allocation)
@@ -32,11 +30,10 @@ func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error {
 	c.ResetBuffer(BuffWork)
 	c.ResetBuffer(BuffErr)
 
-	// Table name: StructName() lowercased + "s"
-	tableName := namer.StructName()
+	// Table name: StructName() lowercased
+	tableName := typ.Name()
 	c.WrString(BuffOut, tableName)
 	c.ToLower()
-	c.WrString(BuffOut, "s")
 	tableStr := c.GetString(BuffOut)
 	c.ResetBuffer(BuffOut)
 
