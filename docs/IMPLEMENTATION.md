@@ -12,7 +12,7 @@ High-performance SQL INSERT generation for Go structs using tinyreflect and tiny
 
 ## Current API
 ```go
-func (s *Structsql) Insert(sql *string, values *[]any, structs ...any) error
+func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error
 ```
 
 ## Architecture Improvements
@@ -67,7 +67,7 @@ s := structsql.New()
 var sql string
 var values []any
 
-err := s.Insert(&sql, &values, user)
+err := s.Insert(user, &sql, &values)
 // sql: "INSERT INTO users (id, name, email) VALUES (?, ?, ?)"
 // values: [1, "Alice", "alice@example.com"]
 ```

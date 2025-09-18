@@ -4,12 +4,12 @@ import (
 	. "github.com/cdvelop/tinystring"
 )
 
-type FieldInfo struct {
+type fieldInfo struct {
 	Name string
 }
 
-type TypeInfo struct {
-	fields []FieldInfo
+type typeInfo struct {
+	fields []fieldInfo
 }
 
 type Structsql struct {
@@ -19,7 +19,7 @@ type Structsql struct {
 
 type typeCacheEntry struct {
 	typePtr uintptr
-	info    *TypeInfo
+	info    *typeInfo
 }
 
 func New() *Structsql {

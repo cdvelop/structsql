@@ -1,12 +1,5 @@
 package structsql_test
 
-import (
-	"reflect"
-	"testing"
-
-	"github.com/cdvelop/structsql"
-)
-
 type User struct {
 	ID    int    `db:"id,pk"`
 	Name  string `db:"name"`

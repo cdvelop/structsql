@@ -7,7 +7,7 @@ import (
 	. "github.com/cdvelop/tinystring"
 )
 
-func (s *Structsql) Insert(sql *string, values *[]any, structTable any) error {
+func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error {
 	if structTable == nil {
 		return Err("no struct table provided")
 	}
@@ -20,7 +20,7 @@ func (s *Structsql) Insert(sql *string, values *[]any, structTable any) error {
 		return Err("input is not a struct")
 	}
 
-	if typ.Name() == "" {
+	if typ.Name() == "struct" {
 		return Err("struct does not implement StructNamer interface")
 	}
 
@@ -30,8 +30,8 @@ func (s *Structsql) Insert(sql *string, values *[]any, structTable any) error {
 	c.ResetBuffer(BuffWork)
 	c.ResetBuffer(BuffErr)
 
-	// Table name: StructName() lowercased
-	tableName := typ.Name()
+	// Table name: StructName() + "s" lowercased
+	tableName := typ.Name() + "s"
 	c.WrString(BuffOut, tableName)
 	c.ToLower()
 	tableStr := c.GetString(BuffOut)
@@ -42,23 +42,23 @@ func (s *Structsql) Insert(sql *string, values *[]any, structTable any) error {
 
 	// Get cached type info (slice-based lookup)
 	typPtr := uintptr(unsafe.Pointer(typ))
-	var typeInfo *TypeInfo
+	var info *typeInfo
 
 	// Find existing cache entry
 	for _, entry := range s.typeCache {
 		if entry.typePtr == typPtr {
-			typeInfo = entry.info
+			info = entry.info
 			break
 		}
 	}
 
-	if typeInfo == nil {
+	if info == nil {
 		// Build cache
 		numFields, err := typ.NumField()
 		if err != nil {
 			return err
 		}
-		fields := make([]FieldInfo, numFields)
+		fields := make([]fieldInfo, numFields)
 		for i := 0; i < numFields; i++ {
 			field, err := typ.Field(i)
 			if err != nil {
@@ -69,18 +69,18 @@ func (s *Structsql) Insert(sql *string, values *[]any, structTable any) error {
 			s.convPool.ToLower()
 			name := s.convPool.GetString(BuffOut)
 			s.convPool.ResetBuffer(BuffOut)
-			fields[i] = FieldInfo{Name: name}
+			fields[i] = fieldInfo{Name: name}
 		}
-		typeInfo = &TypeInfo{fields: fields}
+		info = &typeInfo{fields: fields}
 
 		// Add to cache
 		if len(s.typeCache) < cap(s.typeCache) {
-			s.typeCache = append(s.typeCache, typeCacheEntry{typePtr: typPtr, info: typeInfo})
+			s.typeCache = append(s.typeCache, typeCacheEntry{typePtr: typPtr, info: info})
 		}
 		// If cache is full, don't cache (simple approach)
 	}
 
-	numFields := len(typeInfo.fields)
+	numFields := len(info.fields)
 	if numFields == 0 {
 		return Err("struct has no fields")
 	}
@@ -90,7 +90,7 @@ func (s *Structsql) Insert(sql *string, values *[]any, structTable any) error {
 	var colCount int
 
 	for i := 0; i < numFields; i++ {
-		fieldName := typeInfo.fields[i].Name
+		fieldName := info.fields[i].Name
 		columns[colCount] = fieldName
 		colCount++
 	}
