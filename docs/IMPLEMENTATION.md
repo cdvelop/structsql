@@ -63,14 +63,19 @@ func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error
 
 ## Usage Example
 ```go
-s := structsql.New()
+s := structsql.New() // Defaults to PostgreSQL
 var sql string
 var values []any
 
 err := s.Insert(user, &sql, &values)
-// sql: "INSERT INTO users (id, name, email) VALUES (?, ?, ?)"
+// sql: "INSERT INTO users (id, name, email) VALUES ($1, $2, $3)"
 // values: [1, "Alice", "alice@example.com"]
 ```
+
+// For SQLite support
+s := structsql.New(structsql.SQLite)
+err := s.Insert(user, &sql, &values)
+// sql: "INSERT INTO users (id, name, email) VALUES (?, ?, ?)"
 
 ## Implementation Details
 
