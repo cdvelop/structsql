@@ -9,7 +9,7 @@ import (
 
 func TestDelete(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
-	wantSQL := "DELETE FROM users WHERE id=$1"
+	wantSQL := "DELETE FROM user WHERE id=$1"
 	wantArgs := []any{1}
 
 	s := structsql.New() // Default PostgreSQL
@@ -32,7 +32,7 @@ func TestDelete(t *testing.T) {
 
 func TestDeleteSQLite(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
-	wantSQL := "DELETE FROM users WHERE id=?"
+	wantSQL := "DELETE FROM user WHERE id=?"
 	wantArgs := []any{1}
 
 	s := structsql.New(structsql.SQLite)

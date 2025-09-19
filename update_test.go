@@ -9,7 +9,7 @@ import (
 
 func TestUpdate(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
-	wantSQL := "UPDATE users SET name=$1, email=$2 WHERE id=$3"
+	wantSQL := "UPDATE user SET name=$1, email=$2 WHERE id=$3"
 	wantArgs := []any{"Alice", "alice@example.com", 1}
 
 	s := structsql.New() // Default PostgreSQL
@@ -32,7 +32,7 @@ func TestUpdate(t *testing.T) {
 
 func TestUpdateSQLite(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
-	wantSQL := "UPDATE users SET name=?, email=? WHERE id=?"
+	wantSQL := "UPDATE user SET name=?, email=? WHERE id=?"
 	wantArgs := []any{"Alice", "alice@example.com", 1}
 
 	s := structsql.New(structsql.SQLite)

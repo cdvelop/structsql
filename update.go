@@ -30,7 +30,7 @@ func (s *Structsql) Update(structTable any, sql *string, values *[]any) error {
 	c.ResetBuffer(BuffErr)
 
 	// Table name
-	tableName := typ.Name() + "s"
+	tableName := typ.Name()
 	c.WrString(BuffOut, tableName)
 	c.ToLower()
 	tableStr := c.GetString(BuffOut)
@@ -76,16 +76,17 @@ func (s *Structsql) Update(structTable any, sql *string, values *[]any) error {
 		return Err("struct has no fields")
 	}
 
-	// Find ID field index
+	// Find primary key field index
 	idIndex := -1
 	for i, field := range info.fields {
-		if field.Name == "id" {
+		_, isPK := IDorPrimaryKey(tableStr, field.Name)
+		if isPK {
 			idIndex = i
 			break
 		}
 	}
 	if idIndex == -1 {
-		return Err("struct must have an 'id' field for update")
+		return Err("struct must have a primary key field for update")
 	}
 
 	// Collect SET fields (all except id)

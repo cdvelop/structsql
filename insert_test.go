@@ -9,7 +9,7 @@ import (
 
 func TestInsert(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
-	wantSQL := "INSERT INTO users (id, name, email) VALUES ($1, $2, $3)"
+	wantSQL := "INSERT INTO user (id, name, email) VALUES ($1, $2, $3)"
 	wantArgs := []any{1, "Alice", "alice@example.com"}
 
 	s := structsql.New() // Default PostgreSQL
@@ -32,7 +32,7 @@ func TestInsert(t *testing.T) {
 
 func TestInsertSQLite(t *testing.T) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
-	wantSQL := "INSERT INTO users (id, name, email) VALUES (?, ?, ?)"
+	wantSQL := "INSERT INTO user (id, name, email) VALUES (?, ?, ?)"
 	wantArgs := []any{1, "Alice", "alice@example.com"}
 
 	s := structsql.New(structsql.SQLite)

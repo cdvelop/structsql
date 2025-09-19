@@ -31,7 +31,7 @@ func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error {
 	c.ResetBuffer(BuffErr)
 
 	// Table name: StructName() + "s" lowercased
-	tableName := typ.Name() + "s"
+	tableName := typ.Name()
 	c.WrString(BuffOut, tableName)
 	c.ToLower()
 	tableStr := c.GetString(BuffOut)
