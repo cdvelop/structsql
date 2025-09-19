@@ -35,12 +35,33 @@ func (s *Structsql) setupConv() *Conv {
 }
 
 func (s *Structsql) getTableName(typ *tinyreflect.Type, tableStr *string) {
+	typPtr := uintptr(unsafe.Pointer(typ))
+
+	// Check cache first
+	for _, entry := range s.tableNameCache {
+		if entry.typePtr == typPtr {
+			*tableStr = entry.tableName
+			return
+		}
+	}
+
+	// Not in cache, generate and cache it
 	c := s.convPool
 	tableName := typ.Name()
 	c.WrString(BuffOut, tableName)
 	c.ToLower()
-	*tableStr = c.GetString(BuffOut)
+	cachedName := c.GetString(BuffOut)
 	c.ResetBuffer(BuffOut)
+
+	// Cache the result
+	if len(s.tableNameCache) < cap(s.tableNameCache) {
+		s.tableNameCache = append(s.tableNameCache, tableNameCacheEntry{
+			typePtr:   typPtr,
+			tableName: cachedName,
+		})
+	}
+
+	*tableStr = cachedName
 }
 
 func (s *Structsql) getTypeInfo(typ *tinyreflect.Type) (*typeInfo, error) {

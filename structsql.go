@@ -31,10 +31,16 @@ type typeInfo struct {
 	fields []fieldInfo
 }
 
+type tableNameCacheEntry struct {
+	typePtr   uintptr
+	tableName string
+}
+
 type Structsql struct {
-	typeCache []typeCacheEntry
-	convPool  *Conv
-	dbType    dbType
+	typeCache      []typeCacheEntry
+	tableNameCache []tableNameCacheEntry
+	convPool       *Conv
+	dbType         dbType
 }
 
 type typeCacheEntry struct {
@@ -56,9 +62,10 @@ func New(configs ...any) *Structsql {
 	conv := GetConv()
 
 	s := &Structsql{
-		typeCache: make([]typeCacheEntry, 0, 16), // Pre-allocate capacity
-		convPool:  conv,                          // Single Conv instance per Structsql
-		dbType:    db,
+		typeCache:      make([]typeCacheEntry, 0, 16),     // Pre-allocate capacity
+		tableNameCache: make([]tableNameCacheEntry, 0, 8), // Pre-allocate for table names
+		convPool:       conv,                              // Single Conv instance per Structsql
+		dbType:         db,
 	}
 
 	return s

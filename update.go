@@ -86,10 +86,8 @@ func (s *Structsql) Update(structTable any, sql *string, values *[]any) error {
 				return err
 			}
 			if !fieldVal.IsZero() {
-				iface, err := fieldVal.Interface()
-				if err != nil {
-					return err
-				}
+				var iface any
+				fieldVal.InterfaceZeroAlloc(&iface)
 				*values = append(*values, iface)
 			}
 		}
@@ -99,10 +97,8 @@ func (s *Structsql) Update(structTable any, sql *string, values *[]any) error {
 	if err != nil {
 		return err
 	}
-	iface, err := fieldVal.Interface()
-	if err != nil {
-		return err
-	}
+	var iface any
+	fieldVal.InterfaceZeroAlloc(&iface)
 	*values = append(*values, iface)
 
 	return nil

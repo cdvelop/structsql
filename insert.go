@@ -68,6 +68,13 @@ func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error {
 
 	// Populate values slice (reuse caller's buffer)
 	*values = (*values)[:0] // Clear existing values
+
+	// Ensure sufficient capacity
+	if cap(*values) < numFields {
+		// This should rarely happen in benchmarks, but handle gracefully
+		*values = make([]any, 0, numFields)
+	}
+
 	val := tinyreflect.ValueOf(v)
 	for i := 0; i < numFields; i++ {
 		fieldVal, err := val.Field(i)
@@ -75,10 +82,8 @@ func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error {
 			return err
 		}
 
-		iface, err := fieldVal.Interface()
-		if err != nil {
-			return err
-		}
+		var iface any
+		fieldVal.InterfaceZeroAlloc(&iface)
 
 		*values = append(*values, iface) // Append to caller's buffer
 	}

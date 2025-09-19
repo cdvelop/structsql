@@ -44,10 +44,8 @@ func (s *Structsql) Delete(structTable any, sql *string, values *[]any) error {
 	if err != nil {
 		return err
 	}
-	iface, err := fieldVal.Interface()
-	if err != nil {
-		return err
-	}
+	var iface any
+	fieldVal.InterfaceZeroAlloc(&iface)
 	*values = append(*values, iface)
 
 	return nil
