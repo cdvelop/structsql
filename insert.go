@@ -1,83 +1,27 @@
 package structsql
 
 import (
-	"unsafe"
-
 	"github.com/cdvelop/tinyreflect"
 	. "github.com/cdvelop/tinystring"
 )
 
 func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error {
-	if structTable == nil {
-		return Err("no struct table provided")
+	typ, err := s.validateStruct(structTable)
+	if err != nil {
+		return err
 	}
 
 	// For now, handle only single struct (first one)
 	v := structTable
 
-	typ := tinyreflect.TypeOf(v)
-	if typ.Kind() != K.Struct {
-		return Err("input is not a struct")
-	}
+	c := s.setupConv()
 
-	if typ.Name() == "struct" {
-		return Err("struct does not implement StructNamer interface")
-	}
+	var tableStr string
+	s.getTableName(typ, &tableStr)
 
-	// Use instance Conv (no allocation)
-	c := s.convPool
-	c.ResetBuffer(BuffOut)
-	c.ResetBuffer(BuffWork)
-	c.ResetBuffer(BuffErr)
-
-	// Table name: StructName() + "s" lowercased
-	tableName := typ.Name()
-	c.WrString(BuffOut, tableName)
-	c.ToLower()
-	tableStr := c.GetString(BuffOut)
-	c.ResetBuffer(BuffOut)
-
-	// Reset for reuse
-	c.ResetBuffer(BuffOut)
-
-	// Get cached type info (slice-based lookup)
-	typPtr := uintptr(unsafe.Pointer(typ))
-	var info *typeInfo
-
-	// Find existing cache entry
-	for _, entry := range s.typeCache {
-		if entry.typePtr == typPtr {
-			info = entry.info
-			break
-		}
-	}
-
-	if info == nil {
-		// Build cache
-		numFields, err := typ.NumField()
-		if err != nil {
-			return err
-		}
-		fields := make([]fieldInfo, numFields)
-		for i := 0; i < numFields; i++ {
-			field, err := typ.Field(i)
-			if err != nil {
-				return err
-			}
-			// Use instance Conv for field name processing
-			s.convPool.WrString(BuffOut, field.Name.Name())
-			s.convPool.ToLower()
-			name := s.convPool.GetString(BuffOut)
-			s.convPool.ResetBuffer(BuffOut)
-			fields[i] = fieldInfo{Name: name}
-		}
-		info = &typeInfo{fields: fields}
-
-		// Add to cache
-		if len(s.typeCache) < cap(s.typeCache) {
-			s.typeCache = append(s.typeCache, typeCacheEntry{typePtr: typPtr, info: info})
-		}
-		// If cache is full, don't cache (simple approach)
+	info, err := s.getTypeInfo(typ)
+	if err != nil {
+		return err
 	}
 
 	numFields := len(info.fields)

@@ -1,74 +1,26 @@
 package structsql
 
 import (
-	"unsafe"
-
 	"github.com/cdvelop/tinyreflect"
 	. "github.com/cdvelop/tinystring"
 )
 
 func (s *Structsql) Update(structTable any, sql *string, values *[]any) error {
-	if structTable == nil {
-		return Err("no struct table provided")
+	typ, err := s.validateStruct(structTable)
+	if err != nil {
+		return err
 	}
 
 	v := structTable
 
-	typ := tinyreflect.TypeOf(v)
-	if typ.Kind() != K.Struct {
-		return Err("input is not a struct")
-	}
+	c := s.setupConv()
 
-	if typ.Name() == "struct" {
-		return Err("struct does not implement StructNamer interface")
-	}
+	var tableStr string
+	s.getTableName(typ, &tableStr)
 
-	// Use instance Conv
-	c := s.convPool
-	c.ResetBuffer(BuffOut)
-	c.ResetBuffer(BuffWork)
-	c.ResetBuffer(BuffErr)
-
-	// Table name
-	tableName := typ.Name()
-	c.WrString(BuffOut, tableName)
-	c.ToLower()
-	tableStr := c.GetString(BuffOut)
-	c.ResetBuffer(BuffOut)
-
-	// Get cached type info
-	typPtr := uintptr(unsafe.Pointer(typ))
-	var info *typeInfo
-
-	for _, entry := range s.typeCache {
-		if entry.typePtr == typPtr {
-			info = entry.info
-			break
-		}
-	}
-
-	if info == nil {
-		numFields, err := typ.NumField()
-		if err != nil {
-			return err
-		}
-		fields := make([]fieldInfo, numFields)
-		for i := 0; i < numFields; i++ {
-			field, err := typ.Field(i)
-			if err != nil {
-				return err
-			}
-			s.convPool.WrString(BuffOut, field.Name.Name())
-			s.convPool.ToLower()
-			name := s.convPool.GetString(BuffOut)
-			s.convPool.ResetBuffer(BuffOut)
-			fields[i] = fieldInfo{Name: name}
-		}
-		info = &typeInfo{fields: fields}
-
-		if len(s.typeCache) < cap(s.typeCache) {
-			s.typeCache = append(s.typeCache, typeCacheEntry{typePtr: typPtr, info: info})
-		}
+	info, err := s.getTypeInfo(typ)
+	if err != nil {
+		return err
 	}
 
 	numFields := len(info.fields)
@@ -77,16 +29,9 @@ func (s *Structsql) Update(structTable any, sql *string, values *[]any) error {
 	}
 
 	// Find primary key field index
-	idIndex := -1
-	for i, field := range info.fields {
-		_, isPK := IDorPrimaryKey(tableStr, field.Name)
-		if isPK {
-			idIndex = i
-			break
-		}
-	}
-	if idIndex == -1 {
-		return Err("struct must have a primary key field for update")
+	idIndex, err := s.findIdField(tableStr, info.fields, true)
+	if err != nil {
+		return err
 	}
 
 	// Collect SET fields (all except id)
