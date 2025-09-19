@@ -34,13 +34,21 @@ func (s *Structsql) Update(structTable any, sql *string, values *[]any) error {
 		return err
 	}
 
-	// Collect SET fields (all except id)
+	val := tinyreflect.ValueOf(v)
+
+	// Collect SET fields (non-zero, non-id)
 	var setColumns [32]string
 	var setCount int
 	for i := 0; i < numFields; i++ {
 		if i != idIndex {
-			setColumns[setCount] = info.fields[i].Name
-			setCount++
+			fieldVal, err := val.Field(i)
+			if err != nil {
+				return err
+			}
+			if !fieldVal.IsZero() {
+				setColumns[setCount] = info.fields[i].Name
+				setCount++
+			}
 		}
 	}
 
@@ -69,20 +77,21 @@ func (s *Structsql) Update(structTable any, sql *string, values *[]any) error {
 
 	*sql = c.GetStringZeroCopy(BuffOut)
 
-	// Populate values
+	// Populate values (only non-zero SET fields)
 	*values = (*values)[:0]
-	val := tinyreflect.ValueOf(v)
 	for i := 0; i < numFields; i++ {
 		if i != idIndex {
 			fieldVal, err := val.Field(i)
 			if err != nil {
 				return err
 			}
-			iface, err := fieldVal.Interface()
-			if err != nil {
-				return err
+			if !fieldVal.IsZero() {
+				iface, err := fieldVal.Interface()
+				if err != nil {
+					return err
+				}
+				*values = append(*values, iface)
 			}
-			*values = append(*values, iface)
 		}
 	}
 	// Add ID at the end

@@ -53,6 +53,52 @@ func TestUpdateSQLite(t *testing.T) {
 	}
 }
 
+func TestUpdatePartial(t *testing.T) {
+	u := User{ID: 1, Email: "alice@example.com"} // Name is zero value ""
+	wantSQL := "UPDATE user SET email=$1 WHERE id=$2"
+	wantArgs := []any{"alice@example.com", 1}
+
+	s := structsql.New() // Default PostgreSQL
+	var gotSQL string
+	gotArgs := make([]any, 0, 10)
+
+	err := s.Update(u, &gotSQL, &gotArgs)
+	if err != nil {
+		t.Fatalf("Update error: %v", err)
+	}
+
+	if gotSQL != wantSQL {
+		t.Fatalf("Update SQL mismatch:\n got: %s\nwant: %s", gotSQL, wantSQL)
+	}
+
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("Update args mismatch:\n got: %v\nwant: %v", gotArgs, wantArgs)
+	}
+}
+
+func TestUpdatePartialSQLite(t *testing.T) {
+	u := User{ID: 1, Email: "alice@example.com"} // Name is zero value ""
+	wantSQL := "UPDATE user SET email=? WHERE id=?"
+	wantArgs := []any{"alice@example.com", 1}
+
+	s := structsql.New(structsql.SQLite)
+	var gotSQL string
+	gotArgs := make([]any, 0, 10)
+
+	err := s.Update(u, &gotSQL, &gotArgs)
+	if err != nil {
+		t.Fatalf("Update error: %v", err)
+	}
+
+	if gotSQL != wantSQL {
+		t.Fatalf("Update SQL mismatch:\n got: %s\nwant: %s", gotSQL, wantSQL)
+	}
+
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("Update args mismatch:\n got: %v\nwant: %v", gotArgs, wantArgs)
+	}
+}
+
 func BenchmarkUpdate(b *testing.B) {
 	u := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
 	s := structsql.New()
