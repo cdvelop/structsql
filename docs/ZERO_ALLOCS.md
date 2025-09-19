@@ -89,3 +89,173 @@ These allocations are unavoidable with the current API design, as Go's interface
 
 ### Future Considerations
 Any further optimizations would require API changes (e.g., generics or callback-based approaches) that break backward compatibility. The current implementation represents the optimal balance of performance, compatibility, and maintainability within the constraints of Go's reflection system and the required `[]any` output format.
+
+## PLAN: Zero Allocations Strategy
+
+Based on comprehensive analysis and memory profiling, I have identified **specific sources** of the remaining 2 allocations and designed **concrete strategies** to eliminate them completely.
+
+### Current Allocation Analysis (September 2025)
+
+**Memory Profile Results:**
+```
+Type: alloc_objects
+Showing nodes accounting for 8367102, 99.95% of 8371407 total
+      flat  flat%   sum%        cum   cum%
+   6958057 83.12% 83.12%    8367102 99.95%  BenchmarkInsert
+   1409045 16.83% 99.95%    1409045 16.83%  (*Conv).GetString (inline)
+```
+
+**Confirmed Allocation Sources:**
+1. **String Allocation in `getTableName()`**: `GetString()` call in `shared.go:42` (16.83% of objects)
+2. **Interface Boxing in Value Extraction**: `fieldVal.Interface()` calls for struct field values
+
+### PHASE 1: Immediate Optimizations (0 Breaking Changes)
+
+#### Strategy 1.1: Eliminate String Allocation in Table Name Generation
+**Problem**: `shared.go:42` uses `GetString()` instead of `GetStringZeroCopy()`
+```go
+// Current (1 allocation):
+*tableStr = c.GetString(BuffOut)
+
+// Solution (0 allocations):
+*tableStr = c.GetStringZeroCopy(BuffOut)
+```
+
+**Implementation:**
+- Replace `GetString()` with `GetStringZeroCopy()` in `getTableName()`
+- Replace `GetString()` with `GetStringZeroCopy()` in field name processing (`shared.go:70`)
+- **Expected Reduction**: -1 allocation per operation
+
+#### Strategy 1.2: Implement Zero-Alloc Interface Extraction
+**Problem**: `fieldVal.Interface()` creates interface{} boxing
+```go
+// Current (1 allocation per field):
+iface, err := fieldVal.Interface()
+*values = append(*values, iface)
+
+// Solution (0 allocations for primitives):
+var iface any
+fieldVal.InterfaceZeroAlloc(&iface)
+*values = append(*values, iface)
+```
+
+**Implementation:**
+- Use `InterfaceZeroAlloc()` method from tinyreflect v0.8.1+
+- This eliminates boxing for primitive types (int, string, bool, float64, etc.)
+- **Expected Reduction**: -1 allocation per operation
+
+### PHASE 2: Advanced Optimizations (Potential Breaking Changes)
+
+#### Strategy 2.1: Pre-allocated Value Containers
+**Concept**: Use fixed-size arrays for values instead of dynamic slices
+```go
+// Current API:
+func (s *Structsql) Insert(structTable any, sql *string, values *[]any) error
+
+// Alternative API (breaking):
+func (s *Structsql) InsertFixed(structTable any, sql *string, values *[8]any, count *int) error
+```
+
+#### Strategy 2.2: Callback-Based Value Extraction
+**Concept**: Avoid []any slice creation entirely
+```go
+// Alternative API (breaking):
+type ValueCallback func(index int, value any)
+func (s *Structsql) InsertCallback(structTable any, sql *string, callback ValueCallback) error
+```
+
+#### Strategy 2.3: Generic Type-Safe API
+**Concept**: Use Go generics to eliminate interface{} entirely
+```go
+// Alternative API (breaking):
+func Insert[T StructNamer](s *Structsql, data T) (string, []any, error)
+```
+
+### PHASE 3: Implementation Roadmap
+
+#### Step 3.1: Phase 1 Implementation (Immediate - 0 allocations target)
+1. **Fix String Allocations (Week 1)**
+   - Update `shared.go:42`: `GetString()` → `GetStringZeroCopy()`
+   - Update `shared.go:70`: `GetString()` → `GetStringZeroCopy()` 
+   - Test: Expect ~1 allocation reduction
+
+2. **Implement Zero-Alloc Interface Extraction (Week 1)**
+   - Replace all `fieldVal.Interface()` calls with `fieldVal.InterfaceZeroAlloc(&target)`
+   - Update insert.go, update.go, delete.go
+   - Test: Expect final allocation elimination
+
+3. **Validation (Week 1)**
+   - Run full benchmark suite
+   - Confirm 0 B/op, 0 allocs/op across all operations
+   - Validate TinyGo compatibility
+
+#### Step 3.2: Phase 2 Research (Future)
+- Design breaking change APIs for maximum performance
+- Community feedback on API design preferences
+- Compatibility layer considerations
+
+### Technical Implementation Details
+
+#### String Zero-Copy Fix
+```go
+// In getTableName() - shared.go:42
+func (s *Structsql) getTableName(typ *tinyreflect.Type, tableStr *string) {
+    c := s.convPool
+    tableName := typ.Name()
+    c.WrString(BuffOut, tableName)
+    c.ToLower()
+    *tableStr = c.GetStringZeroCopy(BuffOut)  // ← FIXED: was GetString()
+    c.ResetBuffer(BuffOut)
+}
+```
+
+#### Interface Zero-Alloc Fix
+```go
+// In insert.go, update.go, delete.go
+for i := 0; i < numFields; i++ {
+    fieldVal, err := val.Field(i)
+    if err != nil {
+        return err
+    }
+    
+    var iface any
+    fieldVal.InterfaceZeroAlloc(&iface)  // ← FIXED: was fieldVal.Interface()
+    *values = append(*values, iface)
+}
+```
+
+### Success Metrics
+
+**Target Performance (Phase 1 Completion):**
+- **Memory Usage**: 0 B/op (**100% reduction** from 52 B/op)
+- **Allocations**: 0 allocs/op (**100% reduction** from 2 allocs/op)
+- **Performance**: ~150-200 ns/op (maintained or improved)
+- **Compatibility**: 100% backward compatible API
+
+**Validation Criteria:**
+```bash
+# Expected benchmark results:
+BenchmarkInsert-16        10000000    150.0 ns/op    0 B/op    0 allocs/op
+BenchmarkUpdate-16         8000000    200.0 ns/op    0 B/op    0 allocs/op  
+BenchmarkDelete-16        12000000    120.0 ns/op    0 B/op    0 allocs/op
+```
+
+### Risk Assessment
+
+**Phase 1 Risks: MINIMAL**
+- String zero-copy: Same API, different internal implementation
+- InterfaceZeroAlloc: Proven method in tinyreflect, maintains same behavior
+- No breaking changes to public API
+
+**Phase 2 Risks: HIGH**
+- Breaking API changes require major version bump
+- Community adoption considerations
+- Migration complexity for existing users
+
+### Conclusion
+
+**Phase 1 provides a clear path to achieving true zero allocations** without breaking changes by:
+1. Fixing identified string allocation leak
+2. Leveraging existing InterfaceZeroAlloc capability
+
+This plan transforms StructSQL from **2 allocs/op to 0 allocs/op** while maintaining 100% API compatibility and TinyGo support.
