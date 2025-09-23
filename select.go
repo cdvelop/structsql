@@ -1,7 +1,7 @@
 package structsql
 
-func Select(any) (string, error) {
+func Select(args ...any) error {
 
-	return "", nil
+	return nil
 
 }
