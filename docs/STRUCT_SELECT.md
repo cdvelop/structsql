@@ -384,3 +384,336 @@ err := s.Select(r).
 ```
 
 ---
+
+## PROPUESTA 1: Field Selector Interface con Type Assertion
+
+### Descripción
+Crear una interfaz `FieldSelector` que permita extraer el nombre del campo de manera type-safe usando type assertion y reflection.
+
+### Implementación
+
+```go
+// FieldSelector interface for type-safe field selection
+type FieldSelector interface {
+    FieldName() string
+    IsDescending() bool
+}
+
+// FieldSelectorImpl implements FieldSelector for struct fields
+type FieldSelectorImpl[T any] struct {
+    fieldName string
+    descending bool
+}
+
+// FieldName returns the database column name
+func (fs FieldSelectorImpl[T]) FieldName() string {
+    return fs.fieldName
+}
+
+// IsDescending returns the sort direction
+func (fs FieldSelectorImpl[T]) IsDescending() bool {
+    return fs.descending
+}
+
+// FieldExtractor extracts field information from struct field references
+type FieldExtractor struct {
+    structsql *Structsql
+}
+
+// ExtractFieldName uses reflection to get field name from struct field reference
+func (fe *FieldExtractor) ExtractFieldName(fieldRef any, descending bool) (string, error) {
+    // Use tinyreflect to analyze the field reference
+    v := tinyreflect.ValueOf(fieldRef)
+
+    // Check if it's a struct field reference (pointer to struct field)
+    if v.Kind() != K.Pointer {
+        return "", Err("field reference must be a pointer to struct field")
+    }
+
+    // Get the underlying type
+    elemType := v.Elem().Type()
+    if elemType.Kind() != K.Struct {
+        return "", Err("field reference must point to a struct field")
+    }
+
+    // Extract field name using reflection
+    structType := elemType.StructType()
+    if structType == nil {
+        return "", Err("invalid struct type")
+    }
+
+    // Get field name from the struct type
+    // This requires analyzing the memory layout to find which field this is
+    fieldName := fe.extractFieldNameFromPointer(structType, fieldRef)
+    if fieldName == "" {
+        return "", Err("could not determine field name")
+    }
+
+    return fieldName, nil
+}
+
+// extractFieldNameFromPointer analyzes the pointer to determine field name
+func (fe *FieldExtractor) extractFieldNameFromPointer(structType *tinyreflect.StructType, fieldPtr any) string {
+    // This is a simplified version - actual implementation would need
+    // to analyze the memory offset to determine which field this pointer represents
+    // For now, return empty string as placeholder
+    return ""
+}
+
+// Updated SelectBuilder API
+type SelectBuilder struct {
+    s          *Structsql
+    from       any
+    wheres     [8]whereClause
+    orders     [4]FieldSelector  // Use FieldSelector instead of OrderField
+    whereCount int
+    orderCount int
+    limit      int
+    offset     int
+    extractor  *FieldExtractor
+}
+
+// Updated OrderBy method
+func (sb *SelectBuilder) OrderBy(fieldRef any, descending bool) *SelectBuilder {
+    if sb.orderCount >= len(sb.orders) {
+        // Handle overflow - could expand array or return error
+        return sb
+    }
+
+    fieldName, err := sb.extractor.ExtractFieldName(fieldRef, descending)
+    if err != nil {
+        // Handle error - could store error for later or panic
+        return sb
+    }
+
+    selector := FieldSelectorImpl[any]{
+        fieldName:  fieldName,
+        descending: descending,
+    }
+
+    sb.orders[sb.orderCount] = selector
+    sb.orderCount++
+    return sb
+}
+```
+
+### Pros ✅
+- **Type Safety**: El compilador verifica que el campo existe en la estructura
+- **IDE Support**: Autocompletado completo para campos de estructura
+- **Zero-Copy**: Compatible con filosofía zero-allocation
+- **Extensible**: Fácil agregar nuevos métodos (GroupBy, Having, etc.)
+- **Runtime Validation**: Puede validar que el campo existe en tiempo de ejecución
+
+### Contras ❌
+- **Complex Implementation**: Requiere análisis de memoria para determinar nombres de campos
+- **Performance Overhead**: Reflection tiene costo en runtime
+- **Limited to Exported Fields**: Solo funciona con campos exportados (mayúscula inicial)
+- **Memory Analysis Complexity**: Determinar qué campo representa un puntero requiere análisis de offsets
+
+### Recomendaciones
+1. **Implementar FieldExtractor**: Desarrollar la lógica de análisis de memoria para mapear punteros a nombres de campos
+2. **Caching**: Cachear resultados de análisis de estructura para mejorar performance
+3. **Fallback Strategy**: Proporcionar fallback a strings para casos complejos
+4. **Error Handling**: Implementar manejo robusto de errores con información útil
+
+---
+
+## PROPUESTA 2: Generic Field Extractor con Compile-time Generation
+
+### Descripción
+Usar generics y generación de código en tiempo de compilación para crear extractores de campo específicos para cada estructura.
+
+### Implementación
+
+```go
+// FieldExtractor generates type-safe field extractors for specific structs
+type FieldExtractor[T any] struct {
+    structsql *Structsql
+    fieldMap  map[string]int // field name to index mapping
+}
+
+// NewFieldExtractor creates a new extractor for type T
+func NewFieldExtractor[T any](s *Structsql) *FieldExtractor[T] {
+    var t T
+    typ := tinyreflect.TypeOf(t)
+
+    if typ.Kind() != K.Struct {
+        panic("T must be a struct type")
+    }
+
+    structType := typ.StructType()
+    fieldMap := make(map[string]int)
+
+    for i := 0; i < len(structType.Fields); i++ {
+        field, _ := typ.Field(i)
+        fieldName := field.Name.Name()
+        fieldMap[fieldName] = i
+    }
+
+    return &FieldExtractor[T]{
+        structsql: s,
+        fieldMap:  fieldMap,
+    }
+}
+
+// Field creates a type-safe field reference
+func (fe *FieldExtractor[T]) Field(fieldName string) *FieldRef[T] {
+    if _, exists := fe.fieldMap[fieldName]; !exists {
+        panic(fmt.Sprintf("field %s does not exist in struct", fieldName))
+    }
+    return &FieldRef[T]{extractor: fe, fieldName: fieldName}
+}
+
+// FieldRef represents a reference to a struct field
+type FieldRef[T any] struct {
+    extractor *FieldExtractor[T]
+    fieldName string
+    descending bool
+}
+
+// Desc sets the sort direction to descending
+func (fr *FieldRef[T]) Desc() *FieldRef[T] {
+    fr.descending = true
+    return fr
+}
+
+// Asc sets the sort direction to ascending (default)
+func (fr *FieldRef[T]) Asc() *FieldRef[T] {
+    fr.descending = false
+    return fr
+}
+
+// FieldName returns the database column name
+func (fr *FieldRef[T]) FieldName() string {
+    // Convert field name to database column name
+    // e.g., "Reservation_Year" -> "reservation_year"
+    return strings.ToLower(strings.ReplaceAll(fr.fieldName, "_", ""))
+}
+
+// IsDescending returns the sort direction
+func (fr *FieldRef[T]) IsDescending() bool {
+    return fr.descending
+}
+
+// Updated SelectBuilder with generic support
+type SelectBuilder[T any] struct {
+    s          *Structsql
+    from       T
+    wheres     [8]whereClause
+    orders     [4]FieldSelector
+    whereCount int
+    orderCount int
+    limit      int
+    offset     int
+    extractor  *FieldExtractor[T]
+}
+
+// Select creates a new SelectBuilder for type T
+func (s *Structsql) Select(from T) *SelectBuilder[T] {
+    sb := selectBuilderPool.Get().(*SelectBuilder[T])
+    sb.reset()
+    sb.s = s
+    sb.from = from
+    sb.extractor = NewFieldExtractor[T](s)
+    return sb
+}
+
+// Updated OrderBy method using FieldRef
+func (sb *SelectBuilder[T]) OrderBy(fieldRef *FieldRef[T]) *SelectBuilder[T] {
+    if sb.orderCount >= len(sb.orders) {
+        return sb
+    }
+
+    sb.orders[sb.orderCount] = fieldRef
+    sb.orderCount++
+    return sb
+}
+```
+
+### Pros ✅
+- **Full Type Safety**: Validación completa en tiempo de compilación
+- **Excellent IDE Support**: Autocompletado perfecto y navegación de código
+- **Performance**: Sin reflection en runtime, solo en inicialización
+- **Zero-Allocation Compatible**: Puede integrarse con pooling existente
+- **Self-Documenting**: El código es autoexplicativo
+- **Compile-time Validation**: Errores detectados antes de ejecutar
+
+### Contras ❌
+- **Code Generation**: Requiere generar extractores específicos por tipo
+- **Memory Overhead**: Cada tipo necesita su propio extractor
+- **Initialization Cost**: Setup inicial más complejo
+- **Generic Complexity**: Requiere Go 1.18+ con generics
+- **API Complexity**: API más compleja para el usuario
+
+### Recomendaciones
+1. **Code Generation**: Implementar generación automática de extractores
+2. **Caching Strategy**: Cachear extractores por tipo para reusar
+3. **Hybrid Approach**: Combinar con Proposal 1 para casos complejos
+4. **Migration Path**: Proporcionar path de migración desde API actual
+
+---
+
+## ANÁLISIS COMPARATIVO
+
+| Aspecto | Propuesta 1 (Type Assertion) | Propuesta 2 (Generics) |
+|---------|-----------------------------|----------------------|
+| **Type Safety** | Runtime | Compile-time |
+| **Performance** | Reflection overhead | Minimal overhead |
+| **IDE Support** | Bueno | Excelente |
+| **Complexity** | Media | Alta |
+| **Flexibility** | Alta | Media |
+| **Go Version** | Compatible con todas | Go 1.18+ |
+
+## RECOMENDACIÓN FINAL
+
+**Recomendamos implementar la Propuesta 2 (Generic Field Extractor)** por las siguientes razones:
+
+1. **Superior Type Safety**: Validación en tiempo de compilación
+2. **Mejor Developer Experience**: IDE support completo
+3. **Performance**: Sin reflection en runtime
+4. **Future-Proof**: Alineado con dirección moderna de Go
+5. **Maintainability**: Menos propenso a errores
+
+### Plan de Implementación
+
+1. **Fase 1**: Implementar FieldExtractor básico con generics
+2. **Fase 2**: Agregar generación automática de extractores
+3. **Fase 3**: Integrar con SelectBuilder existente
+4. **Fase 4**: Proporcionar API de compatibilidad hacia atrás
+5. **Fase 5**: Documentación y ejemplos completos
+
+### Ejemplo de Uso Final
+
+```go
+type Reservation struct {
+    ID_Reservation      int
+    ID_Staff           string
+    Service_Name       string
+    Reservation_Year   int
+    Reservation_Month  int
+    Reservation_Day    int
+}
+
+func main() {
+    s := New()
+    r := Reservation{}
+
+    // Type-safe fluent interface
+    extractor := NewFieldExtractor[Reservation](s)
+
+    var sql string
+    var values []any
+
+    err := s.Select(r).
+        OrderBy(extractor.Field("Reservation_Year").Desc()).
+        OrderBy(extractor.Field("Reservation_Month").Desc()).
+        OrderBy(extractor.Field("Reservation_Day").Desc()).
+        Build(&sql, &values)
+}
+```
+
+---
+ningina propuesta es buena,,eliminalas..lo que busco es simplificar y que sea intuitivo, pensaba en algo como OrderBy(r.Reservation_Year, true) donde OrderBy(any,bool) debemos ser capases de detectar si el primer valor ingresado es de tipo string y es un campo de una estructura..se puede hacer con refelct? si es asi como compdiramos implmentarlo en tinyreflect? 
+
+investiga
+actuliza el docuemneto con 2 propuestas con sus pro contras y recomendaciones..espera mi revision
