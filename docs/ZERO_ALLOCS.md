@@ -50,7 +50,7 @@ BenchmarkDelete-16       8540102     141.2 ns/op    48 B/op    1 allocs/op
 
 2. **✅ Enhanced InterfaceZeroAlloc** 
    - Improved implementation in tinyreflect using direct `EmptyInterface` manipulation
-   - Avoids interface{} boxing for primitive types using unsafe pointer manipulation
+   - Avoids any boxing for primitive types using unsafe pointer manipulation
    - **Result**: Reduced interface boxing overhead
 
 3. **✅ Type Information Caching**
@@ -91,7 +91,7 @@ BenchmarkDelete-16       8286229     142.9 ns/op    48 B/op    1 allocs/op
 
 2. **✅ Enhanced InterfaceZeroAlloc** 
    - Improved implementation in tinyreflect using direct `EmptyInterface` manipulation
-   - Avoids interface{} boxing for primitive types using unsafe pointer manipulation
+   - Avoids any boxing for primitive types using unsafe pointer manipulation
    - **Result**: Reduced interface boxing overhead
 
 #### **Technical Implementation Details:**

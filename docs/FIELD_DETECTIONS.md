@@ -78,7 +78,7 @@ Popular Go ORMs handle partial updates differently:
 ### Current Capabilities
 - `ValueOf()` - Create reflected value
 - `Field(i)` - Access struct fields
-- `Interface()` - Get value as interface{}
+- `Interface()` - Get value as any
 - `IsZero()` - Zero value detection ✅ **IMPLEMENTED**
 - Basic type accessors: `String()`, `Int()`, `Bool()`, etc.
 
